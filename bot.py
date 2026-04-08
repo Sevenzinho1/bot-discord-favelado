@@ -4,7 +4,7 @@ import re
 from typing import Optional, List
 
 # ─── Configuração ────────────────────────────────────────────────────────────
-TOKEN = "MTQ4OTQyNzY1NTYyMjM5NDA1MA.GljEm8.SBCkkRwk791tQDBB8WNutSwz2CP-T-xGDTw2-U"
+TOKEN = os.environ.get("DISCORD_TOKEN")
 ROLE_PREFIX = "Membro"                 # Prefixo dos cargos: Membro 1, Membro 2 …
 ROLE_COLOR = discord.Color.blurple()   # Cor dos cargos criados automaticamente
 INVITE_LINK = "https://discord.gg/m3BtpBhcy6"  # Link de convite do servidor
