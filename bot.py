@@ -5,7 +5,7 @@ import os
 from typing import Optional, List
 
 # ─── Configuração ────────────────────────────────────────────────────────────
-TOKEN = os.environ.get("DISCORD_TOKEN")
+TOKEN = os.environ.get("DISCORD_TOKEN")  # Token via variável de ambiente no Railway
 ROLE_PREFIX = "Membro"                 # Prefixo dos cargos: Membro 1, Membro 2 …
 ROLE_COLOR = discord.Color.blurple()   # Cor dos cargos criados automaticamente
 INVITE_LINK = "https://discord.gg/m3BtpBhcy6"  # Link de convite do servidor
@@ -46,12 +46,15 @@ async def find_empty_role(roles: List[discord.Role]) -> Optional[discord.Role]:
 
 
 async def create_next_role(guild: discord.Guild, roles: List[discord.Role]) -> discord.Role:
-    """Cria o próximo cargo na sequência numérica."""
+    """Cria o próximo cargo na sequência numérica, posicionado abaixo dos existentes."""
     if roles:
         last_num = parse_role_number(roles[-1])
         next_num = last_num + 1
+        # Posição abaixo do último cargo gerenciado (posição menor = mais baixo no Discord)
+        position = max(roles[-1].position - 1, 1)
     else:
         next_num = 1
+        position = 1
 
     new_role_name = f"{ROLE_PREFIX} {next_num}"
     new_role = await guild.create_role(
@@ -59,7 +62,14 @@ async def create_next_role(guild: discord.Guild, roles: List[discord.Role]) -> d
         color=ROLE_COLOR,
         reason="Criado automaticamente pelo bot de boas-vindas",
     )
-    print(f"[Bot] Cargo criado: '{new_role_name}'")
+
+    # Move o cargo para a posição correta (abaixo dos anteriores)
+    try:
+        await new_role.edit(position=position)
+    except discord.HTTPException:
+        pass  # Se falhar ao mover, mantém onde está
+
+    print(f"[Bot] Cargo criado: '{new_role_name}' na posição {position}")
     return new_role
 
 
