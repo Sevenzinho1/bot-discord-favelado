@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import re
+import os
 from typing import Optional, List
 
 # ─── Configuração ────────────────────────────────────────────────────────────
