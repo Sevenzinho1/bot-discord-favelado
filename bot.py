@@ -10,7 +10,7 @@ TOKEN = os.environ.get("DISCORD_TOKEN")
 ROLE_PREFIX = "Membro"
 ROLE_COLOR = discord.Color.blurple()
 INVITE_LINK = "https://discord.gg/m3BtpBhcy6"
-OWNER_ID = 308987924559691788  # Único usuário autorizado a usar !sortear
+OWNER_ID = 308987924559691788
 
 # ─── Setup do bot ────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
@@ -83,6 +83,30 @@ async def send_invite(user: discord.User, motivo: str):
         print(f"[Bot] Não foi possível enviar DM para {user.display_name} (DMs fechadas)")
 
 
+async def reajustar_hierarquia(guild: discord.Guild, numero_saiu: int):
+    """
+    Quando um membro sai do cargo número X, todos os membros dos cargos
+    X+1, X+2, ... sobem uma posição (N+1 → N). O último cargo fica vazio.
+    """
+    managed_roles = get_managed_roles(guild)
+
+    # Filtra apenas os cargos acima do que ficou vazio
+    roles_abaixo = [r for r in managed_roles if parse_role_number(r) > numero_saiu]
+
+    for role in roles_abaixo:
+        num = parse_role_number(role)
+        # Encontra o cargo anterior (num - 1)
+        cargo_anterior = next((r for r in managed_roles if parse_role_number(r) == num - 1), None)
+        if cargo_anterior is None:
+            continue
+
+        # Move cada membro deste cargo para o cargo anterior
+        for member in list(role.members):
+            await member.remove_roles(role, reason="Reajuste de hierarquia após saída")
+            await member.add_roles(cargo_anterior, reason="Reajuste de hierarquia após saída")
+            print(f"[Bot] {member.display_name}: {role.name} → {cargo_anterior.name}")
+
+
 # ─── Evento: membro entra no servidor ────────────────────────────────────────
 
 @bot.event
@@ -104,12 +128,33 @@ async def on_member_join(member: discord.Member):
 
 @bot.event
 async def on_member_remove(member: discord.Member):
+    guild = member.guild
+
+    # Verifica se foi ban (para não mandar DM duplicada)
     try:
-        await member.guild.fetch_ban(member)
-        return
+        await guild.fetch_ban(member)
+        is_ban = True
     except discord.NotFound:
-        pass
-    await send_invite(member, "saiu ou foi expulso")
+        is_ban = False
+
+    # Descobre qual cargo gerenciado o membro tinha
+    managed_roles = get_managed_roles(guild)
+    managed_role_ids = {parse_role_number(r): r for r in managed_roles}
+
+    numero_saiu = None
+    for num, role in managed_role_ids.items():
+        # Como o membro já saiu, verificamos pelos roles que ele tinha (member.roles ainda disponível)
+        if role in member.roles:
+            numero_saiu = num
+            break
+
+    # Reajusta a hierarquia se encontrou o cargo
+    if numero_saiu is not None:
+        print(f"[Bot] {member.display_name} saiu do {ROLE_PREFIX} {numero_saiu}, reajustando hierarquia...")
+        await reajustar_hierarquia(guild, numero_saiu)
+
+    if not is_ban:
+        await send_invite(member, "saiu ou foi expulso")
 
 
 # ─── Evento: membro foi banido ────────────────────────────────────────────────
@@ -140,18 +185,16 @@ async def listar_cargos(ctx: commands.Context):
 # ─── Comando: sortear cargos ─────────────────────────────────────────────────
 
 @bot.command(name="sortear")
-@commands.check(lambda ctx: ctx.author.id == 308987924559691788)
-@commands.has_permissions(manage_roles=True)
-@commands.cooldown(1, 10, commands.BucketType.guild)  # Evita duplo disparo
+@commands.check(lambda ctx: ctx.author.id == OWNER_ID)
+@commands.cooldown(1, 10, commands.BucketType.guild)
 async def sortear_cargos(ctx: commands.Context):
     guild = ctx.guild
     await ctx.send("🔀 Sorteando cargos, aguarde...")
 
-    # 1. Pega todos os cargos gerenciados
     managed_roles = get_managed_roles(guild)
     managed_role_ids = {r.id for r in managed_roles}
 
-    # 2. Coleta membros que possuem qualquer cargo gerenciado (sem duplicatas)
+    # Coleta membros com cargos gerenciados
     members_with_roles = []
     seen_ids = set()
     for role in managed_roles:
@@ -164,22 +207,22 @@ async def sortear_cargos(ctx: commands.Context):
         await ctx.send("❌ Nenhum membro com cargos gerenciados encontrado.")
         return
 
-    # 3. Remove TODOS os cargos gerenciados de TODOS os membros envolvidos
+    # Remove todos os cargos gerenciados de todos
     for member in members_with_roles:
         roles_to_remove = [r for r in member.roles if r.id in managed_role_ids]
         if roles_to_remove:
             await member.remove_roles(*roles_to_remove, reason="Sorteio: limpando cargos antigos")
 
-    # 4. Embaralha os membros
+    # Embaralha
     random.shuffle(members_with_roles)
 
-    # 5. Garante cargos suficientes
-    managed_roles = get_managed_roles(guild)  # Recarrega após possíveis criações
+    # Garante cargos suficientes
+    managed_roles = get_managed_roles(guild)
     while len(managed_roles) < len(members_with_roles):
         new_role = await create_next_role(guild, managed_roles)
         managed_roles.append(new_role)
 
-    # 6. Atribui 1 cargo por membro na nova ordem
+    # Atribui e monta mensagem
     lines = ["🎲 **Nova hierarquia de cargos atualizada.** @everyone\n"]
     for i, member in enumerate(members_with_roles):
         role = managed_roles[i]
