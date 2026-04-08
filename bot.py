@@ -14,6 +14,7 @@ INVITE_LINK = "https://discord.gg/m3BtpBhcy6"  # Link de convite do servidor
 # ─── Setup do bot ────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.members = True
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
