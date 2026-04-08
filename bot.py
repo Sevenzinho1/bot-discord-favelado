@@ -10,6 +10,7 @@ TOKEN = os.environ.get("DISCORD_TOKEN")
 ROLE_PREFIX = "Membro"
 ROLE_COLOR = discord.Color.blurple()
 INVITE_LINK = "https://discord.gg/m3BtpBhcy6"
+OWNER_ID = 308987924559691788  # Único usuário autorizado a usar !sortear
 
 # ─── Setup do bot ────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
@@ -139,6 +140,7 @@ async def listar_cargos(ctx: commands.Context):
 # ─── Comando: sortear cargos ─────────────────────────────────────────────────
 
 @bot.command(name="sortear")
+@commands.check(lambda ctx: ctx.author.id == 308987924559691788)
 @commands.has_permissions(manage_roles=True)
 @commands.cooldown(1, 10, commands.BucketType.guild)  # Evita duplo disparo
 async def sortear_cargos(ctx: commands.Context):
