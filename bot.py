@@ -2,12 +2,13 @@ import discord
 from discord.ext import commands
 import re
 import os
+import random
 from typing import Optional, List
 
 # ─── Configuração ────────────────────────────────────────────────────────────
 TOKEN = os.environ.get("DISCORD_TOKEN")  # Token via variável de ambiente no Railway
-ROLE_PREFIX = "Membro"                 # Prefixo dos cargos: Membro 1, Membro 2 …
-ROLE_COLOR = discord.Color.blurple()   # Cor dos cargos criados automaticamente
+ROLE_PREFIX = "Membro"                   # Prefixo dos cargos: Membro 1, Membro 2 …
+ROLE_COLOR = discord.Color.blurple()     # Cor dos cargos criados automaticamente
 INVITE_LINK = "https://discord.gg/m3BtpBhcy6"  # Link de convite do servidor
 
 # ─── Setup do bot ────────────────────────────────────────────────────────────
@@ -50,7 +51,6 @@ async def create_next_role(guild: discord.Guild, roles: List[discord.Role]) -> d
     if roles:
         last_num = parse_role_number(roles[-1])
         next_num = last_num + 1
-        # Posição abaixo do último cargo gerenciado (posição menor = mais baixo no Discord)
         position = max(roles[-1].position - 1, 1)
     else:
         next_num = 1
@@ -63,11 +63,10 @@ async def create_next_role(guild: discord.Guild, roles: List[discord.Role]) -> d
         reason="Criado automaticamente pelo bot de boas-vindas",
     )
 
-    # Move o cargo para a posição correta (abaixo dos anteriores)
     try:
         await new_role.edit(position=position)
     except discord.HTTPException:
-        pass  # Se falhar ao mover, mantém onde está
+        pass
 
     print(f"[Bot] Cargo criado: '{new_role_name}' na posição {position}")
     return new_role
@@ -108,12 +107,11 @@ async def on_member_join(member: discord.Member):
 
 @bot.event
 async def on_member_remove(member: discord.Member):
-    # Verifica se foi um ban (para não mandar DM duplicada)
     try:
         await member.guild.fetch_ban(member)
-        return  # É um ban, o on_member_ban já vai lidar
+        return
     except discord.NotFound:
-        pass  # Não é ban: saiu voluntariamente ou foi expulso
+        pass
 
     await send_invite(member, "saiu ou foi expulso")
 
@@ -125,7 +123,7 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
     await send_invite(user, "foi banido")
 
 
-# ─── Comando de diagnóstico (opcional) ───────────────────────────────────────
+# ─── Comando: listar cargos ───────────────────────────────────────────────────
 
 @bot.command(name="cargos")
 @commands.has_permissions(manage_roles=True)
@@ -142,6 +140,58 @@ async def listar_cargos(ctx: commands.Context):
         lines.append(f"**{role.name}** → {members}")
 
     await ctx.send("\n".join(lines))
+
+
+# ─── Comando: sortear cargos aleatoriamente ───────────────────────────────────
+
+@bot.command(name="sortear")
+@commands.has_permissions(manage_roles=True)
+async def sortear_cargos(ctx: commands.Context):
+    """Redistribui aleatoriamente os cargos entre os membros que já os possuem."""
+    guild = ctx.guild
+    await ctx.send("🔀 Sorteando cargos, aguarde...")
+
+    # 1. Pega todos os cargos gerenciados em ordem crescente
+    managed_roles = get_managed_roles(guild)
+
+    # 2. Coleta todos os membros que possuem algum cargo gerenciado (sem duplicatas)
+    members_with_roles = []
+    seen_ids = set()
+    for role in managed_roles:
+        for member in role.members:
+            if member.id not in seen_ids:
+                members_with_roles.append(member)
+                seen_ids.add(member.id)
+
+    if not members_with_roles:
+        await ctx.send("❌ Nenhum membro com cargos gerenciados encontrado.")
+        return
+
+    # 3. Embaralha a lista de membros
+    random.shuffle(members_with_roles)
+
+    # 4. Garante que há cargos suficientes (cria se necessário)
+    while len(managed_roles) < len(members_with_roles):
+        new_role = await create_next_role(guild, managed_roles)
+        managed_roles.append(new_role)
+
+    # 5. Remove todos os cargos gerenciados de todos os membros envolvidos
+    for member in members_with_roles:
+        roles_to_remove = [r for r in member.roles if r in managed_roles]
+        if roles_to_remove:
+            await member.remove_roles(*roles_to_remove, reason="Sorteio de cargos")
+
+    # 6. Atribui os cargos na nova ordem aleatória e monta a mensagem
+    lines = ["🎲 **Nova hierarquia de cargos atualizada.** @everyone\n"]
+    for i, member in enumerate(members_with_roles):
+        role = managed_roles[i]
+        await member.add_roles(role, reason="Sorteio de cargos")
+        lines.append(f"**{role.name}:** {member.display_name}")
+        print(f"[Bot] Sorteio: {member.display_name} → {role.name}")
+
+    # 7. Envia a mensagem com a nova ordem
+    await ctx.send("\n".join(lines))
+    print(f"[Bot] Sorteio concluído para {len(members_with_roles)} membros.")
 
 
 # ─── Inicialização ────────────────────────────────────────────────────────────
