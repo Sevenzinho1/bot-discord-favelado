@@ -6,10 +6,10 @@ import random
 from typing import Optional, List
 
 # ─── Configuração ────────────────────────────────────────────────────────────
-TOKEN = os.environ.get("DISCORD_TOKEN")  # Token via variável de ambiente no Railway
-ROLE_PREFIX = "Membro"                   # Prefixo dos cargos: Membro 1, Membro 2 …
-ROLE_COLOR = discord.Color.blurple()     # Cor dos cargos criados automaticamente
-INVITE_LINK = "https://discord.gg/m3BtpBhcy6"  # Link de convite do servidor
+TOKEN = os.environ.get("DISCORD_TOKEN")
+ROLE_PREFIX = "Membro"
+ROLE_COLOR = discord.Color.blurple()
+INVITE_LINK = "https://discord.gg/m3BtpBhcy6"
 
 # ─── Setup do bot ────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
@@ -22,14 +22,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ─── Funções auxiliares ───────────────────────────────────────────────────────
 
 def parse_role_number(role: discord.Role) -> Optional[int]:
-    """Retorna o número do cargo se o nome seguir o padrão 'Prefixo N', senão None."""
     pattern = rf"^{re.escape(ROLE_PREFIX)}\s+(\d+)$"
     match = re.match(pattern, role.name, re.IGNORECASE)
     return int(match.group(1)) if match else None
 
 
 def get_managed_roles(guild: discord.Guild) -> List[discord.Role]:
-    """Retorna os cargos gerenciados pelo bot, ordenados pelo número crescente."""
     managed = []
     for role in guild.roles:
         num = parse_role_number(role)
@@ -40,7 +38,6 @@ def get_managed_roles(guild: discord.Guild) -> List[discord.Role]:
 
 
 async def find_empty_role(roles: List[discord.Role]) -> Optional[discord.Role]:
-    """Retorna o primeiro cargo (menor número) que não possui nenhum membro."""
     for role in roles:
         if len(role.members) == 0:
             return role
@@ -48,7 +45,6 @@ async def find_empty_role(roles: List[discord.Role]) -> Optional[discord.Role]:
 
 
 async def create_next_role(guild: discord.Guild, roles: List[discord.Role]) -> discord.Role:
-    """Cria o próximo cargo na sequência numérica, posicionado abaixo dos existentes."""
     if roles:
         last_num = parse_role_number(roles[-1])
         next_num = last_num + 1
@@ -69,12 +65,11 @@ async def create_next_role(guild: discord.Guild, roles: List[discord.Role]) -> d
     except discord.HTTPException:
         pass
 
-    print(f"[Bot] Cargo criado: '{new_role_name}' na posição {position}")
+    print(f"[Bot] Cargo criado: '{new_role_name}'")
     return new_role
 
 
 async def send_invite(user: discord.User, motivo: str):
-    """Envia o link de convite via DM para o usuário."""
     try:
         await user.send(
             f"👋 Olá, **{user.display_name}**!\n\n"
@@ -104,7 +99,7 @@ async def on_member_join(member: discord.Member):
     print(f"[Bot] Cargo '{target_role.name}' atribuído a {member.display_name}")
 
 
-# ─── Evento: membro saiu voluntariamente ou foi expulso ──────────────────────
+# ─── Evento: membro saiu ou foi expulso ──────────────────────────────────────
 
 @bot.event
 async def on_member_remove(member: discord.Member):
@@ -113,7 +108,6 @@ async def on_member_remove(member: discord.Member):
         return
     except discord.NotFound:
         pass
-
     await send_invite(member, "saiu ou foi expulso")
 
 
@@ -129,7 +123,6 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
 @bot.command(name="cargos")
 @commands.has_permissions(manage_roles=True)
 async def listar_cargos(ctx: commands.Context):
-    """Lista os cargos gerenciados e seus membros atuais."""
     roles = get_managed_roles(ctx.guild)
     if not roles:
         await ctx.send("Nenhum cargo gerenciado encontrado.")
@@ -143,19 +136,20 @@ async def listar_cargos(ctx: commands.Context):
     await ctx.send("\n".join(lines))
 
 
-# ─── Comando: sortear cargos aleatoriamente ───────────────────────────────────
+# ─── Comando: sortear cargos ─────────────────────────────────────────────────
 
 @bot.command(name="sortear")
 @commands.has_permissions(manage_roles=True)
+@commands.cooldown(1, 10, commands.BucketType.guild)  # Evita duplo disparo
 async def sortear_cargos(ctx: commands.Context):
-    """Redistribui aleatoriamente os cargos entre os membros que já os possuem."""
     guild = ctx.guild
     await ctx.send("🔀 Sorteando cargos, aguarde...")
 
-    # 1. Pega todos os cargos gerenciados em ordem crescente
+    # 1. Pega todos os cargos gerenciados
     managed_roles = get_managed_roles(guild)
+    managed_role_ids = {r.id for r in managed_roles}
 
-    # 2. Coleta todos os membros que possuem algum cargo gerenciado (sem duplicatas)
+    # 2. Coleta membros que possuem qualquer cargo gerenciado (sem duplicatas)
     members_with_roles = []
     seen_ids = set()
     for role in managed_roles:
@@ -168,21 +162,22 @@ async def sortear_cargos(ctx: commands.Context):
         await ctx.send("❌ Nenhum membro com cargos gerenciados encontrado.")
         return
 
-    # 3. Embaralha a lista de membros
+    # 3. Remove TODOS os cargos gerenciados de TODOS os membros envolvidos
+    for member in members_with_roles:
+        roles_to_remove = [r for r in member.roles if r.id in managed_role_ids]
+        if roles_to_remove:
+            await member.remove_roles(*roles_to_remove, reason="Sorteio: limpando cargos antigos")
+
+    # 4. Embaralha os membros
     random.shuffle(members_with_roles)
 
-    # 4. Garante que há cargos suficientes (cria se necessário)
+    # 5. Garante cargos suficientes
+    managed_roles = get_managed_roles(guild)  # Recarrega após possíveis criações
     while len(managed_roles) < len(members_with_roles):
         new_role = await create_next_role(guild, managed_roles)
         managed_roles.append(new_role)
 
-    # 5. Remove todos os cargos gerenciados de todos os membros envolvidos
-    for member in members_with_roles:
-        roles_to_remove = [r for r in member.roles if r in managed_roles]
-        if roles_to_remove:
-            await member.remove_roles(*roles_to_remove, reason="Sorteio de cargos")
-
-    # 6. Atribui os cargos na nova ordem aleatória e monta a mensagem
+    # 6. Atribui 1 cargo por membro na nova ordem
     lines = ["🎲 **Nova hierarquia de cargos atualizada.** @everyone\n"]
     for i, member in enumerate(members_with_roles):
         role = managed_roles[i]
@@ -190,7 +185,6 @@ async def sortear_cargos(ctx: commands.Context):
         lines.append(f"**{role.name}:** {member.display_name}")
         print(f"[Bot] Sorteio: {member.display_name} → {role.name}")
 
-    # 7. Envia a mensagem com a nova ordem
     await ctx.send("\n".join(lines))
     print(f"[Bot] Sorteio concluído para {len(members_with_roles)} membros.")
 
