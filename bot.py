@@ -3,6 +3,7 @@ from discord.ext import commands
 import re
 import os
 import random
+from datetime import datetime
 from typing import Optional, List
 
 # ─── Configuração ────────────────────────────────────────────────────────────
@@ -11,16 +12,18 @@ ROLE_PREFIX = "Membro"
 ROLE_COLOR = discord.Color.blurple()
 INVITE_LINK = "https://discord.gg/m3BtpBhcy6"
 OWNER_ID = 308987924559691788
+LOG_CHANNEL = "banidos"  # Canal onde todas as mensagens serão enviadas
 
 # ─── Setup do bot ────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
+intents.moderation = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-# ─── Funções auxiliares ───────────────────────────────────────────────────────
+# ─── Funções auxiliares de cargo ─────────────────────────────────────────────
 
 def parse_role_number(role: discord.Role) -> Optional[int]:
     pattern = rf"^{re.escape(ROLE_PREFIX)}\s+(\d+)$"
@@ -60,7 +63,6 @@ async def create_next_role(guild: discord.Guild, roles: List[discord.Role]) -> d
         color=ROLE_COLOR,
         reason="Criado automaticamente pelo bot de boas-vindas",
     )
-
     try:
         await new_role.edit(position=position)
     except discord.HTTPException:
@@ -68,6 +70,31 @@ async def create_next_role(guild: discord.Guild, roles: List[discord.Role]) -> d
 
     print(f"[Bot] Cargo criado: '{new_role_name}'")
     return new_role
+
+
+async def reajustar_hierarquia(guild: discord.Guild, numero_saiu: int):
+    managed_roles = get_managed_roles(guild)
+    roles_abaixo = [r for r in managed_roles if parse_role_number(r) > numero_saiu]
+
+    for role in roles_abaixo:
+        num = parse_role_number(role)
+        cargo_anterior = next((r for r in managed_roles if parse_role_number(r) == num - 1), None)
+        if cargo_anterior is None:
+            continue
+        for member in list(role.members):
+            await member.remove_roles(role, reason="Reajuste de hierarquia após saída")
+            await member.add_roles(cargo_anterior, reason="Reajuste de hierarquia após saída")
+            print(f"[Bot] {member.display_name}: {role.name} → {cargo_anterior.name}")
+
+
+# ─── Funções auxiliares de log ────────────────────────────────────────────────
+
+def get_log_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
+    return discord.utils.get(guild.text_channels, name=LOG_CHANNEL)
+
+
+def hora_agora() -> str:
+    return datetime.now().strftime("%d/%m/%Y às %H:%M")
 
 
 async def send_invite(user: discord.User, motivo: str):
@@ -83,30 +110,6 @@ async def send_invite(user: discord.User, motivo: str):
         print(f"[Bot] Não foi possível enviar DM para {user.display_name} (DMs fechadas)")
 
 
-async def reajustar_hierarquia(guild: discord.Guild, numero_saiu: int):
-    """
-    Quando um membro sai do cargo número X, todos os membros dos cargos
-    X+1, X+2, ... sobem uma posição (N+1 → N). O último cargo fica vazio.
-    """
-    managed_roles = get_managed_roles(guild)
-
-    # Filtra apenas os cargos acima do que ficou vazio
-    roles_abaixo = [r for r in managed_roles if parse_role_number(r) > numero_saiu]
-
-    for role in roles_abaixo:
-        num = parse_role_number(role)
-        # Encontra o cargo anterior (num - 1)
-        cargo_anterior = next((r for r in managed_roles if parse_role_number(r) == num - 1), None)
-        if cargo_anterior is None:
-            continue
-
-        # Move cada membro deste cargo para o cargo anterior
-        for member in list(role.members):
-            await member.remove_roles(role, reason="Reajuste de hierarquia após saída")
-            await member.add_roles(cargo_anterior, reason="Reajuste de hierarquia após saída")
-            print(f"[Bot] {member.display_name}: {role.name} → {cargo_anterior.name}")
-
-
 # ─── Evento: membro entra no servidor ────────────────────────────────────────
 
 @bot.event
@@ -114,14 +117,24 @@ async def on_member_join(member: discord.Member):
     guild = member.guild
     print(f"[Bot] {member.display_name} entrou em '{guild.name}'")
 
+    # Atribui cargo
     managed_roles = get_managed_roles(guild)
     target_role = await find_empty_role(managed_roles)
-
     if target_role is None:
         target_role = await create_next_role(guild, managed_roles)
-
     await member.add_roles(target_role, reason="Cargo automático de boas-vindas")
     print(f"[Bot] Cargo '{target_role.name}' atribuído a {member.display_name}")
+
+    # Mensagem no canal
+    channel = get_log_channel(guild)
+    if channel:
+        embed = discord.Embed(
+            description=f"**{member.display_name}**! Voltou a vida.",
+            color=discord.Color.green()
+        )
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_footer(text=f"ID: {member.id} • {hora_agora()}")
+        await channel.send(embed=embed)
 
 
 # ─── Evento: membro saiu ou foi expulso ──────────────────────────────────────
@@ -130,31 +143,67 @@ async def on_member_join(member: discord.Member):
 async def on_member_remove(member: discord.Member):
     guild = member.guild
 
-    # Verifica se foi ban (para não mandar DM duplicada)
+    # Verifica se foi ban
     try:
         await guild.fetch_ban(member)
         is_ban = True
     except discord.NotFound:
         is_ban = False
 
-    # Descobre qual cargo gerenciado o membro tinha
+    # Reajusta hierarquia
     managed_roles = get_managed_roles(guild)
     managed_role_ids = {parse_role_number(r): r for r in managed_roles}
-
     numero_saiu = None
     for num, role in managed_role_ids.items():
-        # Como o membro já saiu, verificamos pelos roles que ele tinha (member.roles ainda disponível)
         if role in member.roles:
             numero_saiu = num
             break
-
-    # Reajusta a hierarquia se encontrou o cargo
     if numero_saiu is not None:
-        print(f"[Bot] {member.display_name} saiu do {ROLE_PREFIX} {numero_saiu}, reajustando hierarquia...")
+        print(f"[Bot] {member.display_name} saiu do {ROLE_PREFIX} {numero_saiu}, reajustando...")
         await reajustar_hierarquia(guild, numero_saiu)
 
-    if not is_ban:
-        await send_invite(member, "saiu ou foi expulso")
+    channel = get_log_channel(guild)
+
+    if is_ban:
+        return  # on_member_ban cuida do embed de ban
+
+    # Verifica se foi expulsão consultando o audit log
+    executor_name = None
+    is_kick = False
+    try:
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
+            if entry.target.id == member.id:
+                is_kick = True
+                executor_name = entry.user.display_name
+                break
+    except discord.Forbidden:
+        pass
+
+    if channel:
+        if is_kick:
+            # Mensagem de expulsão (mesmas variações do ban)
+            variacao = random.choice(["fuzilado", "mogado"])
+            embed = discord.Embed(
+                description=(
+                    f"**{member.display_name}** Foi {variacao} por **{executor_name or 'alguém'}**\n"
+                    f"he's with tung now 🙏"
+                ),
+                color=discord.Color.orange()
+            )
+            embed.set_thumbnail(url=member.display_avatar.url)
+            embed.set_footer(text=f"ID: {member.id} • {hora_agora()}")
+            await channel.send(embed=embed)
+            await send_invite(member, "foi expulso")
+        else:
+            # Saída voluntária
+            embed = discord.Embed(
+                description=f"**{member.display_name}** saiu do servidor.",
+                color=discord.Color.light_grey()
+            )
+            embed.set_thumbnail(url=member.display_avatar.url)
+            embed.set_footer(text=f"ID: {member.id} • {hora_agora()}")
+            await channel.send(embed=embed)
+            await send_invite(member, "saiu")
 
 
 # ─── Evento: membro foi banido ────────────────────────────────────────────────
@@ -162,6 +211,30 @@ async def on_member_remove(member: discord.Member):
 @bot.event
 async def on_member_ban(guild: discord.Guild, user: discord.User):
     await send_invite(user, "foi banido")
+
+    # Descobre quem baniu pelo audit log
+    executor_name = None
+    try:
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
+            if entry.target.id == user.id:
+                executor_name = entry.user.display_name
+                break
+    except discord.Forbidden:
+        pass
+
+    channel = get_log_channel(guild)
+    if channel:
+        variacao = random.choice(["fuzilado", "mogado"])
+        embed = discord.Embed(
+            description=(
+                f"**{user.display_name}** Foi {variacao} por **{executor_name or 'alguém'}**\n"
+                f"he's with tung now 🙏"
+            ),
+            color=discord.Color.red()
+        )
+        embed.set_thumbnail(url=user.display_avatar.url)
+        embed.set_footer(text=f"ID: {user.id} • {hora_agora()}")
+        await channel.send(embed=embed)
 
 
 # ─── Comando: listar cargos ───────────────────────────────────────────────────
@@ -194,7 +267,6 @@ async def sortear_cargos(ctx: commands.Context):
     managed_roles = get_managed_roles(guild)
     managed_role_ids = {r.id for r in managed_roles}
 
-    # Coleta membros com cargos gerenciados
     members_with_roles = []
     seen_ids = set()
     for role in managed_roles:
@@ -207,22 +279,18 @@ async def sortear_cargos(ctx: commands.Context):
         await ctx.send("❌ Nenhum membro com cargos gerenciados encontrado.")
         return
 
-    # Remove todos os cargos gerenciados de todos
     for member in members_with_roles:
         roles_to_remove = [r for r in member.roles if r.id in managed_role_ids]
         if roles_to_remove:
             await member.remove_roles(*roles_to_remove, reason="Sorteio: limpando cargos antigos")
 
-    # Embaralha
     random.shuffle(members_with_roles)
 
-    # Garante cargos suficientes
     managed_roles = get_managed_roles(guild)
     while len(managed_roles) < len(members_with_roles):
         new_role = await create_next_role(guild, managed_roles)
         managed_roles.append(new_role)
 
-    # Atribui e monta mensagem
     lines = ["🎲 **Nova hierarquia de cargos atualizada.** @everyone\n"]
     for i, member in enumerate(members_with_roles):
         role = managed_roles[i]
