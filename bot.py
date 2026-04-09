@@ -4,6 +4,7 @@ import re
 import os
 import random
 from datetime import datetime
+import zoneinfo
 from typing import Optional, List
 
 # ─── Configuração ────────────────────────────────────────────────────────────
@@ -94,7 +95,8 @@ def get_log_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
 
 
 def hora_agora() -> str:
-    return datetime.now().strftime("%d/%m/%Y às %H:%M")
+    tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+    return datetime.now(tz).strftime("%d/%m/%Y às %H:%M")
 
 
 async def send_invite(user: discord.User, motivo: str):
