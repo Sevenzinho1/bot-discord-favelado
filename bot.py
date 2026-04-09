@@ -3,6 +3,7 @@ from discord.ext import commands
 import re
 import os
 import random
+import asyncio
 from datetime import datetime
 import zoneinfo
 from typing import Optional, List
@@ -13,7 +14,13 @@ ROLE_PREFIX = "Membro"
 ROLE_COLOR = discord.Color.blurple()
 INVITE_LINK = "https://discord.gg/m3BtpBhcy6"
 OWNER_ID = 308987924559691788
-LOG_CHANNEL = "banidos"  # Canal onde todas as mensagens serão enviadas
+LOG_CHANNEL = "banidos"
+SORTEAR_CHANNEL = "geral"
+SORTEAR_INTERVAL_DAYS = 3
+
+# Controle do sorteio automático (em memória)
+ultimo_sorteio: Optional[datetime] = None
+sorteio_task_iniciado = False
 
 # ─── Setup do bot ────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
@@ -94,6 +101,10 @@ def get_log_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
     return discord.utils.get(guild.text_channels, name=LOG_CHANNEL)
 
 
+def get_sortear_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
+    return discord.utils.get(guild.text_channels, name=SORTEAR_CHANNEL)
+
+
 def hora_agora() -> str:
     tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
     return datetime.now(tz).strftime("%d/%m/%Y às %H:%M")
@@ -112,6 +123,82 @@ async def send_invite(user: discord.User, motivo: str):
         print(f"[Bot] Não foi possível enviar DM para {user.display_name} (DMs fechadas)")
 
 
+# ─── Lógica central do sorteio ───────────────────────────────────────────────
+
+async def executar_sorteio(guild: discord.Guild, channel: discord.TextChannel):
+    """Executa o sorteio e envia o resultado no canal informado."""
+    global ultimo_sorteio
+
+    managed_roles = get_managed_roles(guild)
+    managed_role_ids = {r.id for r in managed_roles}
+
+    members_with_roles = []
+    seen_ids = set()
+    for role in managed_roles:
+        for member in role.members:
+            if member.id not in seen_ids:
+                members_with_roles.append(member)
+                seen_ids.add(member.id)
+
+    if not members_with_roles:
+        await channel.send("❌ Nenhum membro com cargos gerenciados encontrado.")
+        return
+
+    # Remove todos os cargos gerenciados
+    for member in members_with_roles:
+        roles_to_remove = [r for r in member.roles if r.id in managed_role_ids]
+        if roles_to_remove:
+            await member.remove_roles(*roles_to_remove, reason="Sorteio: limpando cargos antigos")
+
+    # Embaralha
+    random.shuffle(members_with_roles)
+
+    # Garante cargos suficientes
+    managed_roles = get_managed_roles(guild)
+    while len(managed_roles) < len(members_with_roles):
+        new_role = await create_next_role(guild, managed_roles)
+        managed_roles.append(new_role)
+
+    # Atribui e monta mensagem
+    lines = ["🎲 **Nova hierarquia de cargos atualizada.** @everyone\n"]
+    for i, member in enumerate(members_with_roles):
+        role = managed_roles[i]
+        await member.add_roles(role, reason="Sorteio de cargos")
+        lines.append(f"**{role.name}:** {member.display_name}")
+        print(f"[Bot] Sorteio: {member.display_name} → {role.name}")
+
+    await channel.send("\n".join(lines))
+
+    # Registra o horário do último sorteio
+    tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+    ultimo_sorteio = datetime.now(tz)
+    print(f"[Bot] Sorteio concluído para {len(members_with_roles)} membros. Próximo em {SORTEAR_INTERVAL_DAYS} dias.")
+
+
+# ─── Loop automático de sorteio ──────────────────────────────────────────────
+
+async def loop_sorteio_automatico():
+    """Aguarda 3 dias após o último sorteio e repete automaticamente."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        await asyncio.sleep(60)  # Verifica a cada 1 minuto
+        if ultimo_sorteio is None:
+            continue
+
+        tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+        agora = datetime.now(tz)
+        diff = (agora - ultimo_sorteio).total_seconds()
+        intervalo = SORTEAR_INTERVAL_DAYS * 24 * 60 * 60  # 3 dias em segundos
+
+        if diff >= intervalo:
+            print("[Bot] Disparando sorteio automático...")
+            for guild in bot.guilds:
+                channel = get_sortear_channel(guild)
+                if channel:
+                    await channel.send("🔀 Sorteando cargos automaticamente, aguarde...")
+                    await executar_sorteio(guild, channel)
+
+
 # ─── Evento: membro entra no servidor ────────────────────────────────────────
 
 @bot.event
@@ -119,7 +206,6 @@ async def on_member_join(member: discord.Member):
     guild = member.guild
     print(f"[Bot] {member.display_name} entrou em '{guild.name}'")
 
-    # Atribui cargo
     managed_roles = get_managed_roles(guild)
     target_role = await find_empty_role(managed_roles)
     if target_role is None:
@@ -127,7 +213,6 @@ async def on_member_join(member: discord.Member):
     await member.add_roles(target_role, reason="Cargo automático de boas-vindas")
     print(f"[Bot] Cargo '{target_role.name}' atribuído a {member.display_name}")
 
-    # Mensagem no canal
     channel = get_log_channel(guild)
     if channel:
         embed = discord.Embed(
@@ -145,14 +230,12 @@ async def on_member_join(member: discord.Member):
 async def on_member_remove(member: discord.Member):
     guild = member.guild
 
-    # Verifica se foi ban
     try:
         await guild.fetch_ban(member)
         is_ban = True
     except discord.NotFound:
         is_ban = False
 
-    # Reajusta hierarquia
     managed_roles = get_managed_roles(guild)
     managed_role_ids = {parse_role_number(r): r for r in managed_roles}
     numero_saiu = None
@@ -167,9 +250,8 @@ async def on_member_remove(member: discord.Member):
     channel = get_log_channel(guild)
 
     if is_ban:
-        return  # on_member_ban cuida do embed de ban
+        return
 
-    # Verifica se foi expulsão consultando o audit log
     executor_name = None
     is_kick = False
     try:
@@ -183,7 +265,6 @@ async def on_member_remove(member: discord.Member):
 
     if channel:
         if is_kick:
-            # Mensagem de expulsão (mesmas variações do ban)
             variacao = random.choice(["fuzilado", "mogado"])
             embed = discord.Embed(
                 description=(
@@ -197,7 +278,6 @@ async def on_member_remove(member: discord.Member):
             await channel.send(embed=embed)
             await send_invite(member, "foi expulso")
         else:
-            # Saída voluntária
             embed = discord.Embed(
                 description=f"**{member.display_name}** saiu do servidor.",
                 color=discord.Color.light_grey()
@@ -214,7 +294,6 @@ async def on_member_remove(member: discord.Member):
 async def on_member_ban(guild: discord.Guild, user: discord.User):
     await send_invite(user, "foi banido")
 
-    # Descobre quem baniu pelo audit log
     executor_name = None
     try:
         async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
@@ -264,44 +343,10 @@ async def listar_cargos(ctx: commands.Context):
 @commands.cooldown(1, 10, commands.BucketType.guild)
 async def sortear_cargos(ctx: commands.Context):
     guild = ctx.guild
+    channel = get_sortear_channel(guild) or ctx.channel
     await ctx.send("🔀 Sorteando cargos, aguarde...")
-
-    managed_roles = get_managed_roles(guild)
-    managed_role_ids = {r.id for r in managed_roles}
-
-    members_with_roles = []
-    seen_ids = set()
-    for role in managed_roles:
-        for member in role.members:
-            if member.id not in seen_ids:
-                members_with_roles.append(member)
-                seen_ids.add(member.id)
-
-    if not members_with_roles:
-        await ctx.send("❌ Nenhum membro com cargos gerenciados encontrado.")
-        return
-
-    for member in members_with_roles:
-        roles_to_remove = [r for r in member.roles if r.id in managed_role_ids]
-        if roles_to_remove:
-            await member.remove_roles(*roles_to_remove, reason="Sorteio: limpando cargos antigos")
-
-    random.shuffle(members_with_roles)
-
-    managed_roles = get_managed_roles(guild)
-    while len(managed_roles) < len(members_with_roles):
-        new_role = await create_next_role(guild, managed_roles)
-        managed_roles.append(new_role)
-
-    lines = ["🎲 **Nova hierarquia de cargos atualizada.** @everyone\n"]
-    for i, member in enumerate(members_with_roles):
-        role = managed_roles[i]
-        await member.add_roles(role, reason="Sorteio de cargos")
-        lines.append(f"**{role.name}:** {member.display_name}")
-        print(f"[Bot] Sorteio: {member.display_name} → {role.name}")
-
-    await ctx.send("\n".join(lines))
-    print(f"[Bot] Sorteio concluído para {len(members_with_roles)} membros.")
+    await executar_sorteio(guild, channel)
+    print("[Bot] Sorteio manual executado. Loop automático iniciado.")
 
 
 # ─── Inicialização ────────────────────────────────────────────────────────────
@@ -310,6 +355,7 @@ async def sortear_cargos(ctx: commands.Context):
 async def on_ready():
     print(f"[Bot] Conectado como {bot.user} (ID: {bot.user.id})")
     print(f"[Bot] Prefixo dos cargos: '{ROLE_PREFIX} N'")
+    bot.loop.create_task(loop_sorteio_automatico())
 
 
 bot.run(TOKEN)
