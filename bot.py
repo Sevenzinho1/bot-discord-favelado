@@ -199,6 +199,55 @@ async def loop_sorteio_automatico():
                     await executar_sorteio(guild, channel)
 
 
+# ─── Evento: impede atribuição manual de cargos gerenciados ──────────────────
+
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    guild = after.guild
+    managed_roles = get_managed_roles(guild)
+    managed_role_ids = {r.id: r for r in managed_roles}
+
+    # Cargos que foram adicionados nesta atualização
+    roles_added = set(after.roles) - set(before.roles)
+
+    # Cargos que foram removidos nesta atualização
+    roles_removed = set(before.roles) - set(after.roles)
+
+    for role in roles_added:
+        if role.id not in managed_role_ids:
+            continue  # Não é um cargo gerenciado, ignora
+
+        # Verifica no audit log se foi o bot que atribuiu
+        try:
+            async for entry in guild.audit_logs(limit=3, action=discord.AuditLogAction.member_role_update):
+                if entry.target.id == after.id:
+                    if entry.user.id == bot.user.id:
+                        return  # Foi o próprio bot, permitido
+                    # Foi outra pessoa — remove o cargo
+                    await after.remove_roles(role, reason="Atribuição manual bloqueada pelo bot")
+                    print(f"[Bot] Cargo '{role.name}' removido de {after.display_name} (atribuição manual bloqueada)")
+                    return
+        except discord.Forbidden:
+            pass
+
+    for role in roles_removed:
+        if role.id not in managed_role_ids:
+            continue  # Não é um cargo gerenciado, ignora
+
+        # Verifica no audit log se foi o bot que removeu
+        try:
+            async for entry in guild.audit_logs(limit=3, action=discord.AuditLogAction.member_role_update):
+                if entry.target.id == after.id:
+                    if entry.user.id == bot.user.id:
+                        return  # Foi o próprio bot, permitido
+                    # Foi outra pessoa — restaura o cargo
+                    await after.add_roles(role, reason="Remoção manual bloqueada pelo bot")
+                    print(f"[Bot] Cargo '{role.name}' restaurado em {after.display_name} (remoção manual bloqueada)")
+                    return
+        except discord.Forbidden:
+            pass
+
+
 # ─── Evento: membro entra no servidor ────────────────────────────────────────
 
 @bot.event
