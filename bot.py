@@ -144,25 +144,17 @@ async def tocar_audio_banimento(guild: discord.Guild):
         voice_client = await voice_channel.connect()
         print(f"[Bot] Entrou na call: {voice_channel.name}")
 
-        # Localiza o ffmpeg em múltiplos lugares
-        import glob, shutil
-        ffmpeg_path = shutil.which("ffmpeg")
-        if not ffmpeg_path:
-            nix_ffmpeg = glob.glob("/nix/store/*ffmpeg*/bin/ffmpeg")
-            ffmpeg_path = nix_ffmpeg[0] if nix_ffmpeg else None
-        if not ffmpeg_path:
-            # Fallback: usa imageio para baixar o ffmpeg automaticamente
-            try:
-                import imageio_ffmpeg
-                ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-            except Exception:
-                pass
-        if not ffmpeg_path:
-            raise Exception("ffmpeg não encontrado no sistema.")
-        print(f"[Bot] FFmpeg: {ffmpeg_path}")
+        # Converte MP3 para PCM usando pydub e toca como stream de bytes
+        from pydub import AudioSegment
+        import io
+        print("[Bot] Convertendo áudio para PCM...")
+        audio = AudioSegment.from_mp3(AUDIO_FILE)
+        audio = audio.set_frame_rate(48000).set_channels(2).set_sample_width(2)
+        pcm_data = audio.raw_data
 
-        audio_source = discord.FFmpegPCMAudio(AUDIO_FILE, executable=ffmpeg_path)
+        audio_source = discord.PCMAudio(io.BytesIO(pcm_data))
         voice_client.play(audio_source)
+        print("[Bot] Tocando áudio via PCM...")
 
         # Aguarda o áudio terminar
         while voice_client.is_playing():
