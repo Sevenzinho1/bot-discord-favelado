@@ -457,6 +457,10 @@ async def on_message(message: discord.Message):
     if palavras:
         await message.channel.send(file=discord.File("monster.mp4"))
 
+    # Verifica se a mensagem contém variações de "obrigado/brigado pela/pera lata"
+    if re.search(r'\b(obrigad[oa]|brigad[oa])\b.{0,20}\b(pela|pera)\b.{0,10}\b(lata)\b', message.content, re.IGNORECASE):
+        await message.channel.send("**De nada Chefe!**")
+
     # Necessário para os comandos continuarem funcionando
     await bot.process_commands(message)
 
