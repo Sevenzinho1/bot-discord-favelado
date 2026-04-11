@@ -144,7 +144,13 @@ async def tocar_audio_banimento(guild: discord.Guild):
         print(f"[Bot] Entrou na call: {voice_channel.name}")
 
         # Toca o áudio
-        audio_source = discord.FFmpegPCMAudio(AUDIO_FILE)
+        ffmpeg_path = "/nix/store" if os.path.exists("/nix/store") else "ffmpeg"
+        # Encontra o ffmpeg no nix store do Railway
+        import glob
+        nix_ffmpeg = glob.glob("/nix/store/*ffmpeg*/bin/ffmpeg")
+        if nix_ffmpeg:
+            ffmpeg_path = nix_ffmpeg[0]
+        audio_source = discord.FFmpegPCMAudio(AUDIO_FILE, executable=ffmpeg_path)
         voice_client.play(audio_source)
 
         # Aguarda o áudio terminar
