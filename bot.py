@@ -139,17 +139,21 @@ async def tocar_audio_banimento(guild: discord.Guild):
         print("[Bot] Nenhuma call ativa encontrada, áudio não tocado.")
         return
 
+    voice_client = None
     try:
         voice_client = await voice_channel.connect()
         print(f"[Bot] Entrou na call: {voice_channel.name}")
 
-        # Toca o áudio
-        ffmpeg_path = "/nix/store" if os.path.exists("/nix/store") else "ffmpeg"
-        # Encontra o ffmpeg no nix store do Railway
-        import glob
-        nix_ffmpeg = glob.glob("/nix/store/*ffmpeg*/bin/ffmpeg")
-        if nix_ffmpeg:
-            ffmpeg_path = nix_ffmpeg[0]
+        # Localiza o ffmpeg (shutil.which funciona no Railway com nixpacks)
+        import glob, shutil
+        ffmpeg_path = shutil.which("ffmpeg")
+        if not ffmpeg_path:
+            nix_ffmpeg = glob.glob("/nix/store/*ffmpeg*/bin/ffmpeg")
+            ffmpeg_path = nix_ffmpeg[0] if nix_ffmpeg else None
+        if not ffmpeg_path:
+            raise Exception("ffmpeg não encontrado no sistema.")
+        print(f"[Bot] FFmpeg: {ffmpeg_path}")
+
         audio_source = discord.FFmpegPCMAudio(AUDIO_FILE, executable=ffmpeg_path)
         voice_client.play(audio_source)
 
@@ -161,10 +165,8 @@ async def tocar_audio_banimento(guild: discord.Guild):
         print("[Bot] Saiu da call após tocar o áudio.")
     except Exception as e:
         print(f"[Bot] Erro ao tocar áudio: {e}")
-        try:
+        if voice_client and voice_client.is_connected():
             await voice_client.disconnect()
-        except:
-            pass
 
 
 # ─── Lógica central do sorteio ───────────────────────────────────────────────
