@@ -1,8 +1,5 @@
 [phases.setup]
-nixPkgs = ["ffmpeg", "python311", "python311Packages.pip"]
+nixPkgs = ["ffmpeg"]
 
 [phases.install]
-cmds = ["pip install discord.py[voice] PyNaCl"]
-
-[start]
-cmd = "python bot.py"
+cmds = ["pip install -r requirements.txt"]

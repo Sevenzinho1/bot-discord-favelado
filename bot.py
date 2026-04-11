@@ -144,12 +144,19 @@ async def tocar_audio_banimento(guild: discord.Guild):
         voice_client = await voice_channel.connect()
         print(f"[Bot] Entrou na call: {voice_channel.name}")
 
-        # Localiza o ffmpeg (shutil.which funciona no Railway com nixpacks)
+        # Localiza o ffmpeg em múltiplos lugares
         import glob, shutil
         ffmpeg_path = shutil.which("ffmpeg")
         if not ffmpeg_path:
             nix_ffmpeg = glob.glob("/nix/store/*ffmpeg*/bin/ffmpeg")
             ffmpeg_path = nix_ffmpeg[0] if nix_ffmpeg else None
+        if not ffmpeg_path:
+            # Fallback: usa imageio para baixar o ffmpeg automaticamente
+            try:
+                import imageio_ffmpeg
+                ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+            except Exception:
+                pass
         if not ffmpeg_path:
             raise Exception("ffmpeg não encontrado no sistema.")
         print(f"[Bot] FFmpeg: {ffmpeg_path}")
