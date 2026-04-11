@@ -17,6 +17,7 @@ OWNER_ID = 308987924559691788
 LOG_CHANNEL = "banidos"
 SORTEAR_CHANNEL = "geral"
 SORTEAR_INTERVAL_DAYS = 3
+AUDIO_FILE = "audio_banimento.mp3"  # Áudio tocado ao banir/expulsar
 
 # Controle do sorteio automático (em memória)
 ultimo_sorteio: Optional[datetime] = None
@@ -121,6 +122,43 @@ async def send_invite(user: discord.User, motivo: str):
         print(f"[Bot] Convite enviado para {user.display_name} ({motivo})")
     except discord.Forbidden:
         print(f"[Bot] Não foi possível enviar DM para {user.display_name} (DMs fechadas)")
+
+
+# ─── Função: tocar áudio ao banir/expulsar ───────────────────────────────────
+
+async def tocar_audio_banimento(guild: discord.Guild):
+    """Entra na call com membros, toca o áudio e sai."""
+    # Procura o primeiro canal de voz com ao menos 1 membro
+    voice_channel = None
+    for vc in guild.voice_channels:
+        if len(vc.members) > 0:
+            voice_channel = vc
+            break
+
+    if voice_channel is None:
+        print("[Bot] Nenhuma call ativa encontrada, áudio não tocado.")
+        return
+
+    try:
+        voice_client = await voice_channel.connect()
+        print(f"[Bot] Entrou na call: {voice_channel.name}")
+
+        # Toca o áudio
+        audio_source = discord.FFmpegPCMAudio(AUDIO_FILE)
+        voice_client.play(audio_source)
+
+        # Aguarda o áudio terminar
+        while voice_client.is_playing():
+            await asyncio.sleep(1)
+
+        await voice_client.disconnect()
+        print("[Bot] Saiu da call após tocar o áudio.")
+    except Exception as e:
+        print(f"[Bot] Erro ao tocar áudio: {e}")
+        try:
+            await voice_client.disconnect()
+        except:
+            pass
 
 
 # ─── Lógica central do sorteio ───────────────────────────────────────────────
@@ -326,6 +364,7 @@ async def on_member_remove(member: discord.Member):
             embed.set_footer(text=f"ID: {member.id} • {hora_agora()}")
             await channel.send(embed=embed)
             await send_invite(member, "foi expulso")
+            await tocar_audio_banimento(guild)
         else:
             embed = discord.Embed(
                 description=f"**{member.display_name}** saiu do servidor.",
@@ -342,6 +381,7 @@ async def on_member_remove(member: discord.Member):
 @bot.event
 async def on_member_ban(guild: discord.Guild, user: discord.User):
     await send_invite(user, "foi banido")
+    await tocar_audio_banimento(guild)
 
     executor_name = None
     try:
