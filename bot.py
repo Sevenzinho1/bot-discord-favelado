@@ -445,6 +445,22 @@ async def sortear_cargos(ctx: commands.Context):
     print("[Bot] Sorteio manual executado. Loop automático iniciado.")
 
 
+# ─── Evento: responde com vídeo ao mencionar "monster" ───────────────────────
+
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
+
+    # Verifica se a mensagem contém "monster" ou "monstre" (ignora maiúsculas)
+    palavras = re.findall(r'\b(monsters?|monstre)\b', message.content, re.IGNORECASE)
+    if palavras:
+        await message.channel.send(file=discord.File("monster.mp4"))
+
+    # Necessário para os comandos continuarem funcionando
+    await bot.process_commands(message)
+
+
 # ─── Inicialização ────────────────────────────────────────────────────────────
 
 @bot.event
