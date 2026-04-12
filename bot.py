@@ -445,6 +445,49 @@ async def sortear_cargos(ctx: commands.Context):
     print("[Bot] Sorteio manual executado. Loop automático iniciado.")
 
 
+# ─── Comando: !67 — toca áudio na call com mais membros ─────────────────────
+
+@bot.command(name="67")
+async def cmd_67(ctx: commands.Context):
+    guild = ctx.guild
+
+    # Encontra o canal de voz com MAIS membros (mínimo 1)
+    voice_channel = None
+    max_members = 0
+    for vc in guild.voice_channels:
+        if len(vc.members) > max_members:
+            max_members = len(vc.members)
+            voice_channel = vc
+
+    if voice_channel is None:
+        await ctx.send("Nenhuma call ativa encontrada.")
+        return
+
+    voice_client = None
+    try:
+        voice_client = await voice_channel.connect()
+        print(f"[Bot] !67 — Entrou na call: {voice_channel.name}")
+
+        from pydub import AudioSegment
+        import io
+        audio = AudioSegment.from_mp3("audio_67.mp3")
+        audio = audio.set_frame_rate(48000).set_channels(2).set_sample_width(2)
+        pcm_data = audio.raw_data
+
+        audio_source = discord.PCMAudio(io.BytesIO(pcm_data))
+        voice_client.play(audio_source)
+
+        while voice_client.is_playing():
+            await asyncio.sleep(1)
+
+        await voice_client.disconnect()
+        print("[Bot] !67 — Saiu da call.")
+    except Exception as e:
+        print(f"[Bot] !67 — Erro: {e}")
+        if voice_client and voice_client.is_connected():
+            await voice_client.disconnect()
+
+
 # ─── Evento: responde com vídeo ao mencionar "monster" ───────────────────────
 
 @bot.event
