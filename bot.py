@@ -18,6 +18,7 @@ LOG_CHANNEL = "banidos"
 SORTEAR_CHANNEL = "geral"
 SORTEAR_INTERVAL_DAYS = 3
 AUDIO_FILE = "audio_banimento.mp3"  # Áudio tocado ao banir/expulsar
+ALERT_MEMBER_ID = 501493721595117571  # Membro que dispara o alerta ao transmitir
 
 # Controle do sorteio automático (em memória)
 ultimo_sorteio: Optional[datetime] = None
@@ -548,6 +549,49 @@ async def on_message(message: discord.Message):
 
     # Necessário para os comandos continuarem funcionando
     await bot.process_commands(message)
+
+
+# ─── Evento: alerta quando membro específico inicia transmissão ──────────────
+
+@bot.event
+async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    if member.id != ALERT_MEMBER_ID:
+        return
+
+    # Verifica se começou a transmitir (stream) agora
+    estava_transmitindo = before.self_stream
+    esta_transmitindo = after.self_stream
+
+    if not estava_transmitindo and esta_transmitindo:
+        guild = member.guild
+        voice_channel = after.channel
+        if voice_channel is None:
+            return
+
+        print(f"[Bot] {member.display_name} iniciou transmissão em {voice_channel.name}, entrando...")
+
+        voice_client = None
+        try:
+            voice_client = await voice_channel.connect()
+
+            from pydub import AudioSegment
+            import io
+            audio = AudioSegment.from_mp3("audio_alerta.mp3")
+            audio = audio.set_frame_rate(48000).set_channels(2).set_sample_width(2)
+            pcm_data = audio.raw_data
+
+            audio_source = discord.PCMAudio(io.BytesIO(pcm_data))
+            voice_client.play(audio_source)
+
+            while voice_client.is_playing():
+                await asyncio.sleep(1)
+
+            await voice_client.disconnect()
+            print("[Bot] Alerta tocado, saiu da call.")
+        except Exception as e:
+            print(f"[Bot] Erro no alerta de transmissão: {e}")
+            if voice_client and voice_client.is_connected():
+                await voice_client.disconnect()
 
 
 # ─── Inicialização ────────────────────────────────────────────────────────────
