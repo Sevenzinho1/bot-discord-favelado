@@ -20,7 +20,7 @@ SORTEAR_CHANNEL = "geral"
 SORTEAR_INTERVAL_DAYS = 3
 AUDIO_FILE = "audio_banimento.mp3"  # Áudio tocado ao banir/expulsar
 ALERT_MEMBER_ID = 501493721595117571  # Membro que dispara o alerta ao transmitir
-STATS_FILE = "/app/kick_ban_stats.json"  # Arquivo de estatísticas de banimentos/expulsões
+STATS_FILE = "/data/kick_ban_stats.json"  # Arquivo de estatísticas de banimentos/expulsões
 
 # Controle do sorteio automático (em memória)
 ultimo_sorteio: Optional[datetime] = None
