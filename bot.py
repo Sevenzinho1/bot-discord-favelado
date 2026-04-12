@@ -20,7 +20,7 @@ SORTEAR_CHANNEL = "geral"
 SORTEAR_INTERVAL_DAYS = 3
 AUDIO_FILE = "audio_banimento.mp3"  # Áudio tocado ao banir/expulsar
 ALERT_MEMBER_ID = 501493721595117571  # Membro que dispara o alerta ao transmitir
-STATS_FILE = "/data/kick_ban_stats.json"  # Arquivo de estatísticas de banimentos/expulsões
+STATS_FILE = "kick_ban_stats.json"  # Arquivo de estatísticas de banimentos/expulsões
 
 # Controle do sorteio automático (em memória)
 ultimo_sorteio: Optional[datetime] = None
@@ -217,28 +217,47 @@ def increment_stat(executor_id: int, executor_name: str, victim_id: int = None, 
 
 async def scan_audit_log(guild: discord.Guild):
     """Varre todo o audit log disponível e popula as estatísticas."""
-    stats = {}
+    # Carrega stats existentes para não perder dados já registrados
+    stats = load_stats()
+    # Garante campos necessários em entradas antigas
+    for v in stats.values():
+        if "count" not in v:
+            v["count"] = 0
+        if "received" not in v:
+            v["received"] = 0
+
     actions = [discord.AuditLogAction.ban, discord.AuditLogAction.kick]
     for action in actions:
         try:
-            async for entry in guild.audit_logs(limit=None, action=action):
-                # Executor
-                key = str(entry.user.id)
-                if key not in stats:
-                    stats[key] = {"name": entry.user.display_name, "count": 0, "received": 0}
-                stats[key]["count"] += 1
-                stats[key]["name"] = entry.user.display_name
-                # Vítima
-                vkey = str(entry.target.id)
-                if vkey not in stats:
-                    stats[vkey] = {"name": str(entry.target), "count": 0, "received": 0}
-                if "received" not in stats[vkey]:
-                    stats[vkey]["received"] = 0
-                stats[vkey]["received"] += 1
+            # Busca em lotes de 100 (máximo permitido pela API)
+            last_id = None
+            while True:
+                entries = []
+                kwargs = {"limit": 100, "action": action}
+                if last_id:
+                    kwargs["before"] = discord.Object(id=last_id)
+                async for entry in guild.audit_logs(**kwargs):
+                    entries.append(entry)
+                    # Executor
+                    key = str(entry.user.id)
+                    if key not in stats:
+                        stats[key] = {"name": entry.user.display_name, "count": 0, "received": 0}
+                    stats[key]["count"] += 1
+                    stats[key]["name"] = entry.user.display_name
+                    # Vítima
+                    vkey = str(entry.target.id)
+                    if vkey not in stats:
+                        stats[vkey] = {"name": str(entry.target), "count": 0, "received": 0}
+                    stats[vkey]["received"] += 1
+                if len(entries) < 100:
+                    break  # Não há mais entradas
+                last_id = entries[-1].id
         except discord.Forbidden:
             pass
+
     save_stats(stats)
-    print(f"[Bot] Audit log escaneado: {sum(v['count'] for v in stats.values())} ações registradas.")
+    total = sum(v.get("count", 0) for v in stats.values())
+    print(f"[Bot] Audit log escaneado: {total} ações registradas.")
 
 
 # ─── Lógica central do sorteio ───────────────────────────────────────────────
@@ -752,6 +771,19 @@ async def cmd_fuzilados(ctx: commands.Context):
 
     embed.set_footer(text=f"Atualizado em {hora_agora()}")
     await msg.edit(content=None, embed=embed)
+
+# ─── Comando: !rescan — força rescan do audit log ────────────────────────────
+
+@bot.command(name="rescan")
+@commands.check(lambda ctx: ctx.author.id == OWNER_ID)
+async def cmd_rescan(ctx: commands.Context):
+    msg = await ctx.send("🔍 Rescaneando todo o histórico disponível, aguarde...")
+    await scan_audit_log(ctx.guild)
+    stats = load_stats()
+    total = sum(v.get("count", 0) for v in stats.values())
+    vitimas = sum(v.get("received", 0) for v in stats.values())
+    await msg.edit(content=f"✅ Rescan concluído! **{total}** ações de banimento/expulsão encontradas, **{vitimas}** vítimas registradas.")
+
 
 # ─── Evento: alerta quando membro específico inicia transmissão ──────────────
 
