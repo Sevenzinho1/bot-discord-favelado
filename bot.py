@@ -4,6 +4,7 @@ import re
 import os
 import random
 import asyncio
+import json
 from datetime import datetime
 import zoneinfo
 from typing import Optional, List
@@ -19,6 +20,7 @@ SORTEAR_CHANNEL = "geral"
 SORTEAR_INTERVAL_DAYS = 3
 AUDIO_FILE = "audio_banimento.mp3"  # Áudio tocado ao banir/expulsar
 ALERT_MEMBER_ID = 501493721595117571  # Membro que dispara o alerta ao transmitir
+STATS_FILE = "/app/kick_ban_stats.json"  # Arquivo de estatísticas de banimentos/expulsões
 
 # Controle do sorteio automático (em memória)
 ultimo_sorteio: Optional[datetime] = None
@@ -167,6 +169,55 @@ async def tocar_audio_banimento(guild: discord.Guild):
         print(f"[Bot] Erro ao tocar áudio: {e}")
         if voice_client and voice_client.is_connected():
             await voice_client.disconnect()
+
+
+
+# ─── Funções de estatísticas de ban/kick ─────────────────────────────────────
+
+def load_stats() -> dict:
+    """Carrega estatísticas do arquivo JSON."""
+    if os.path.exists(STATS_FILE):
+        try:
+            with open(STATS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_stats(stats: dict):
+    """Salva estatísticas no arquivo JSON."""
+    with open(STATS_FILE, "w") as f:
+        json.dump(stats, f, indent=2)
+
+
+def increment_stat(executor_id: int, executor_name: str):
+    """Incrementa o contador de um executor."""
+    stats = load_stats()
+    key = str(executor_id)
+    if key not in stats:
+        stats[key] = {"name": executor_name, "count": 0}
+    stats[key]["count"] += 1
+    stats[key]["name"] = executor_name  # Atualiza o nome caso tenha mudado
+    save_stats(stats)
+
+
+async def scan_audit_log(guild: discord.Guild):
+    """Varre todo o audit log disponível e popula as estatísticas."""
+    stats = {}
+    actions = [discord.AuditLogAction.ban, discord.AuditLogAction.kick]
+    for action in actions:
+        try:
+            async for entry in guild.audit_logs(limit=None, action=action):
+                key = str(entry.user.id)
+                if key not in stats:
+                    stats[key] = {"name": entry.user.display_name, "count": 0}
+                stats[key]["count"] += 1
+                stats[key]["name"] = entry.user.display_name
+        except discord.Forbidden:
+            pass
+    save_stats(stats)
+    print(f"[Bot] Audit log escaneado: {sum(v['count'] for v in stats.values())} ações registradas.")
 
 
 # ─── Lógica central do sorteio ───────────────────────────────────────────────
@@ -373,6 +424,8 @@ async def on_member_remove(member: discord.Member):
             await channel.send(embed=embed)
             await send_invite(member, "foi expulso")
             await tocar_audio_banimento(guild)
+            if executor_name:
+                increment_stat(entry.user.id, executor_name)
         else:
             embed = discord.Embed(
                 description=f"**{member.display_name}** saiu do servidor.",
@@ -390,6 +443,15 @@ async def on_member_remove(member: discord.Member):
 async def on_member_ban(guild: discord.Guild, user: discord.User):
     await send_invite(user, "foi banido")
     await tocar_audio_banimento(guild)
+
+    # Registra o banimento nas estatísticas
+    try:
+        async for entry in guild.audit_logs(limit=3, action=discord.AuditLogAction.ban):
+            if entry.target.id == user.id:
+                increment_stat(entry.user.id, entry.user.display_name)
+                break
+    except discord.Forbidden:
+        pass
 
     executor_name = None
     try:
@@ -549,6 +611,62 @@ async def on_message(message: discord.Message):
 
     # Necessário para os comandos continuarem funcionando
     await bot.process_commands(message)
+
+
+# ─── Comando: !top — ranking de banimentos/expulsões ─────────────────────────
+
+@bot.command(name="top")
+async def cmd_top(ctx: commands.Context):
+    guild = ctx.guild
+    msg = await ctx.send("🔍 Carregando ranking, aguarde...")
+
+    # Na primeira vez ou se o arquivo não existir, escaneia o audit log
+    if not os.path.exists(STATS_FILE):
+        await msg.edit(content="🔍 Escaneando histórico do servidor pela primeira vez, aguarde...")
+        await scan_audit_log(guild)
+
+    stats = load_stats()
+    if not stats:
+        await msg.edit(content="Nenhum banimento ou expulsão registrado ainda.")
+        return
+
+    # Ordena do maior para o menor
+    ranking = sorted(stats.items(), key=lambda x: x[1]["count"], reverse=True)
+
+    embed = discord.Embed(
+        title="🏆 Ranking de Fuzilamentos",
+        description="Quem mais eliminou membros do servidor",
+        color=discord.Color.red()
+    )
+
+    medals = ["🥇", "🥈", "🥉"]
+    for i, (user_id, data) in enumerate(ranking[:10]):
+        medal = medals[i] if i < 3 else f"`#{i+1}`"
+        try:
+            member = guild.get_member(int(user_id)) or await guild.fetch_member(int(user_id))
+            avatar_url = member.display_avatar.url
+            name = member.display_name
+        except Exception:
+            avatar_url = None
+            name = data["name"]
+
+        embed.add_field(
+            name=f"{medal} {name}",
+            value=f"**{data['count']}** eliminações",
+            inline=False
+        )
+
+    # Foto do líder no topo
+    if ranking:
+        top_id = ranking[0][0]
+        try:
+            top_member = guild.get_member(int(top_id)) or await guild.fetch_member(int(top_id))
+            embed.set_thumbnail(url=top_member.display_avatar.url)
+        except Exception:
+            pass
+
+    embed.set_footer(text=f"Atualizado em {hora_agora()}")
+    await msg.edit(content=None, embed=embed)
 
 
 # ─── Evento: alerta quando membro específico inicia transmissão ──────────────
