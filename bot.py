@@ -191,14 +191,27 @@ def save_stats(stats: dict):
         json.dump(stats, f, indent=2)
 
 
-def increment_stat(executor_id: int, executor_name: str):
-    """Incrementa o contador de um executor."""
+def increment_stat(executor_id: int, executor_name: str, victim_id: int = None, victim_name: str = None):
+    """Incrementa o contador de um executor e registra a vítima."""
     stats = load_stats()
+
+    # Contagem do executor (quem baniu/expulsou)
     key = str(executor_id)
     if key not in stats:
-        stats[key] = {"name": executor_name, "count": 0}
+        stats[key] = {"name": executor_name, "count": 0, "received": 0}
     stats[key]["count"] += 1
-    stats[key]["name"] = executor_name  # Atualiza o nome caso tenha mudado
+    stats[key]["name"] = executor_name
+
+    # Contagem da vítima (quem foi banido/expulso)
+    if victim_id is not None:
+        vkey = str(victim_id)
+        if vkey not in stats:
+            stats[vkey] = {"name": victim_name, "count": 0, "received": 0}
+        if "received" not in stats[vkey]:
+            stats[vkey]["received"] = 0
+        stats[vkey]["received"] += 1
+        stats[vkey]["name"] = victim_name
+
     save_stats(stats)
 
 
@@ -209,11 +222,19 @@ async def scan_audit_log(guild: discord.Guild):
     for action in actions:
         try:
             async for entry in guild.audit_logs(limit=None, action=action):
+                # Executor
                 key = str(entry.user.id)
                 if key not in stats:
-                    stats[key] = {"name": entry.user.display_name, "count": 0}
+                    stats[key] = {"name": entry.user.display_name, "count": 0, "received": 0}
                 stats[key]["count"] += 1
                 stats[key]["name"] = entry.user.display_name
+                # Vítima
+                vkey = str(entry.target.id)
+                if vkey not in stats:
+                    stats[vkey] = {"name": str(entry.target), "count": 0, "received": 0}
+                if "received" not in stats[vkey]:
+                    stats[vkey]["received"] = 0
+                stats[vkey]["received"] += 1
         except discord.Forbidden:
             pass
     save_stats(stats)
@@ -425,7 +446,7 @@ async def on_member_remove(member: discord.Member):
             await send_invite(member, "foi expulso")
             await tocar_audio_banimento(guild)
             if executor_name:
-                increment_stat(entry.user.id, executor_name)
+                increment_stat(entry.user.id, executor_name, member.id, member.display_name)
         else:
             embed = discord.Embed(
                 description=f"**{member.display_name}** saiu do servidor.",
@@ -448,7 +469,7 @@ async def on_member_ban(guild: discord.Guild, user: discord.User):
     try:
         async for entry in guild.audit_logs(limit=3, action=discord.AuditLogAction.ban):
             if entry.target.id == user.id:
-                increment_stat(entry.user.id, entry.user.display_name)
+                increment_stat(entry.user.id, entry.user.display_name, user.id, user.display_name)
                 break
     except discord.Forbidden:
         pass
@@ -668,6 +689,69 @@ async def cmd_top(ctx: commands.Context):
     embed.set_footer(text=f"Atualizado em {hora_agora()}")
     await msg.edit(content=None, embed=embed)
 
+
+
+# ─── Comando: !fuzilados — ranking de quem mais foi banido/expulso ────────────
+
+@bot.command(name="fuzilados")
+async def cmd_fuzilados(ctx: commands.Context):
+    guild = ctx.guild
+    msg = await ctx.send("🔍 Carregando ranking, aguarde...")
+
+    if not os.path.exists(STATS_FILE):
+        await msg.edit(content="🔍 Escaneando histórico do servidor pela primeira vez, aguarde...")
+        await scan_audit_log(guild)
+
+    stats = load_stats()
+    if not stats:
+        await msg.edit(content="Nenhum banimento ou expulsão registrado ainda.")
+        return
+
+    # Filtra só quem tem received > 0, ordena do maior para o menor
+    ranking = sorted(
+        [(uid, data) for uid, data in stats.items() if data.get("received", 0) > 0],
+        key=lambda x: x[1]["received"],
+        reverse=True
+    )
+
+    if not ranking:
+        await msg.edit(content="Nenhuma vítima registrada ainda.")
+        return
+
+    embed = discord.Embed(
+        title="💀 Ranking dos Fuzilados",
+        description="Quem mais tomou ban/expulsão no servidor",
+        color=discord.Color.dark_red()
+    )
+
+    medals = ["🥇", "🥈", "🥉"]
+    for i, (user_id, data) in enumerate(ranking[:10]):
+        medal = medals[i] if i < 3 else f"`#{i+1}`"
+        try:
+            member = guild.get_member(int(user_id)) or await guild.fetch_member(int(user_id))
+            name = member.display_name
+            avatar_url = member.display_avatar.url
+        except Exception:
+            name = data["name"]
+            avatar_url = None
+
+        embed.add_field(
+            name=f"{medal} {name}",
+            value=f"**{data['received']}** fuzilamento(s)",
+            inline=False
+        )
+
+    # Foto do líder no topo
+    if ranking:
+        top_id = ranking[0][0]
+        try:
+            top_member = guild.get_member(int(top_id)) or await guild.fetch_member(int(top_id))
+            embed.set_thumbnail(url=top_member.display_avatar.url)
+        except Exception:
+            pass
+
+    embed.set_footer(text=f"Atualizado em {hora_agora()}")
+    await msg.edit(content=None, embed=embed)
 
 # ─── Evento: alerta quando membro específico inicia transmissão ──────────────
 
