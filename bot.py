@@ -17,7 +17,7 @@ INVITE_LINK = "https://discord.gg/m3BtpBhcy6"
 OWNER_ID = 308987924559691788
 LOG_CHANNEL = "banidos"
 SORTEAR_CHANNEL = "geral"
-SORTEAR_INTERVAL_DAYS = 3
+SORTEAR_INTERVAL_DAYS = 2
 AUDIO_FILE = "audio_banimento.mp3"  # Áudio tocado ao banir/expulsar
 ALERT_MEMBER_ID = 501493721595117571  # Membro que dispara o alerta ao transmitir
 STATS_FILE = "kick_ban_stats.json"  # Arquivo de estatísticas de banimentos/expulsões
@@ -315,17 +315,22 @@ async def executar_sorteio(guild: discord.Guild, channel: discord.TextChannel):
 # ─── Loop automático de sorteio ──────────────────────────────────────────────
 
 async def loop_sorteio_automatico():
-    """Aguarda 3 dias após o último sorteio e repete automaticamente."""
+    """Aguarda 2 dias após o início do bot e repete automaticamente."""
+    global ultimo_sorteio
     await bot.wait_until_ready()
+
+    # Inicia o timer a partir do momento que o bot sobe
+    tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+    if ultimo_sorteio is None:
+        ultimo_sorteio = datetime.now(tz)
+        print(f"[Bot] Timer do sorteio automático iniciado: {ultimo_sorteio.strftime('%d/%m/%Y %H:%M')}")
+
     while not bot.is_closed():
         await asyncio.sleep(60)  # Verifica a cada 1 minuto
-        if ultimo_sorteio is None:
-            continue
 
-        tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
         agora = datetime.now(tz)
         diff = (agora - ultimo_sorteio).total_seconds()
-        intervalo = SORTEAR_INTERVAL_DAYS * 24 * 60 * 60  # 3 dias em segundos
+        intervalo = SORTEAR_INTERVAL_DAYS * 24 * 60 * 60  # 2 dias em segundos
 
         if diff >= intervalo:
             print("[Bot] Disparando sorteio automático...")
@@ -771,6 +776,74 @@ async def cmd_fuzilados(ctx: commands.Context):
 
     embed.set_footer(text=f"Atualizado em {hora_agora()}")
     await msg.edit(content=None, embed=embed)
+
+# ─── Comando: !tempo — tempo restante para o próximo sorteio ────────────────
+
+@bot.command(name="tempo")
+async def cmd_tempo(ctx: commands.Context):
+    if ultimo_sorteio is None:
+        await ctx.send("⏳ O timer ainda não foi iniciado.")
+        return
+
+    tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+    agora = datetime.now(tz)
+    intervalo = SORTEAR_INTERVAL_DAYS * 24 * 60 * 60
+    diff = (agora - ultimo_sorteio).total_seconds()
+    restante = intervalo - diff
+
+    if restante <= 0:
+        await ctx.send("🎲 O sorteio automático está prestes a acontecer!")
+        return
+
+    dias = int(restante // 86400)
+    horas = int((restante % 86400) // 3600)
+    minutos = int((restante % 3600) // 60)
+
+    proximo = ultimo_sorteio.timestamp() + intervalo
+    proximo_dt = datetime.fromtimestamp(proximo, tz=tz)
+    proximo_str = proximo_dt.strftime("%d/%m/%Y às %H:%M")
+
+    await ctx.send(
+        f"⏳ **Próximo sorteio automático em:**
+"
+        f"**{dias}d {horas}h {minutos}min**
+"
+        f"📅 Previsto para: **{proximo_str}**"
+    )
+
+
+# ─── Comando: !meiotempo — reduz o timer pela metade ─────────────────────────
+
+@bot.command(name="meiotempo")
+@commands.check(lambda ctx: ctx.author.id == OWNER_ID)
+async def cmd_meiotempo(ctx: commands.Context):
+    global ultimo_sorteio
+    if ultimo_sorteio is None:
+        await ctx.send("⏳ O timer ainda não foi iniciado.")
+        return
+
+    tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
+    agora = datetime.now(tz)
+    intervalo = SORTEAR_INTERVAL_DAYS * 24 * 60 * 60
+    diff = (agora - ultimo_sorteio).total_seconds()
+    restante = intervalo - diff
+
+    # Avança o timer pela metade do tempo restante
+    from datetime import timedelta
+    ultimo_sorteio = agora - timedelta(seconds=(intervalo - restante / 2))
+
+    novo_restante = restante / 2
+    dias = int(novo_restante // 86400)
+    horas = int((novo_restante % 86400) // 3600)
+    minutos = int((novo_restante % 3600) // 60)
+
+    await ctx.send(
+        f"⚡ Timer reduzido pela metade!
+"
+        f"⏳ Próximo sorteio em: **{dias}d {horas}h {minutos}min**"
+    )
+    print(f"[Bot] Timer reduzido pela metade por {ctx.author.display_name}.")
+
 
 # ─── Comando: !rescan — força rescan do audit log ────────────────────────────
 
