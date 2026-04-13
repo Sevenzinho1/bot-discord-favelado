@@ -804,11 +804,9 @@ async def cmd_tempo(ctx: commands.Context):
     proximo_str = proximo_dt.strftime("%d/%m/%Y às %H:%M")
 
     await ctx.send(
-        f"⏳ **Próximo sorteio automático em:**
-"
-        f"**{dias}d {horas}h {minutos}min**
-"
-        f"📅 Previsto para: **{proximo_str}**"
+        f"⏳ **Proximo sorteio automatico em:**\n"
+        f"**{dias}d {horas}h {minutos}min**\n"
+        f"Previsto para: **{proximo_str}**"
     )
 
 
@@ -838,9 +836,8 @@ async def cmd_meiotempo(ctx: commands.Context):
     minutos = int((novo_restante % 3600) // 60)
 
     await ctx.send(
-        f"⚡ Timer reduzido pela metade!
-"
-        f"⏳ Próximo sorteio em: **{dias}d {horas}h {minutos}min**"
+        f"Timer reduzido pela metade!\n"
+        f"Proximo sorteio em: **{dias}d {horas}h {minutos}min**"
     )
     print(f"[Bot] Timer reduzido pela metade por {ctx.author.display_name}.")
 
