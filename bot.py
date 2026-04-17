@@ -766,6 +766,34 @@ async def cmd_fuzilados(ctx: commands.Context):
     embed.set_footer(text=f"Atualizado em {hora_agora()}")
     await msg.edit(content=None, embed=embed)
 
+# ─── Comando: !rank — hierarquia atual dos cargos ────────────────────────────
+
+@bot.command(name="rank")
+async def cmd_rank(ctx: commands.Context):
+    guild = ctx.guild
+    managed_roles = get_managed_roles(guild)
+
+    if not managed_roles:
+        await ctx.send("Nenhum cargo gerenciado encontrado.")
+        return
+
+    lines = []
+    for role in managed_roles:
+        if role.members:
+            member = role.members[0]
+            lines.append(f"**{role.name}:** {member.display_name}")
+        else:
+            lines.append(f"**{role.name}:** *(vazio)*")
+
+    embed = discord.Embed(
+        title="Hierarquia Atual",
+        description="\n".join(lines),
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(text=hora_agora())
+    await ctx.send(embed=embed)
+
+
 # ─── Comando: !rescan — força rescan do audit log ────────────────────────────
 
 @bot.command(name="rescan")
