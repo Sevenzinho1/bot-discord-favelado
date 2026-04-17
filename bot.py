@@ -17,14 +17,12 @@ INVITE_LINK = "https://discord.gg/m3BtpBhcy6"
 OWNER_ID = 308987924559691788
 LOG_CHANNEL = "banidos"
 SORTEAR_CHANNEL = "geral"
-SORTEAR_INTERVAL_DAYS = 2
+SORTEAR_MIN_SECONDS = 3600          # 1 hora
+SORTEAR_MAX_SECONDS = 172800         # 2 dias
 AUDIO_FILE = "audio_banimento.mp3"  # Áudio tocado ao banir/expulsar
 ALERT_MEMBER_ID = 501493721595117571  # Membro que dispara o alerta ao transmitir
 STATS_FILE = "kick_ban_stats.json"  # Arquivo de estatísticas de banimentos/expulsões
 
-# Controle do sorteio automático (em memória)
-ultimo_sorteio: Optional[datetime] = None
-sorteio_task_iniciado = False
 
 # ─── Setup do bot ────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
@@ -306,39 +304,30 @@ async def executar_sorteio(guild: discord.Guild, channel: discord.TextChannel):
 
     await channel.send("\n".join(lines))
 
-    # Registra o horário do último sorteio
-    tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
-    ultimo_sorteio = datetime.now(tz)
-    print(f"[Bot] Sorteio concluído para {len(members_with_roles)} membros. Próximo em {SORTEAR_INTERVAL_DAYS} dias.")
+    print(f"[Bot] Sorteio concluído para {len(members_with_roles)} membros.")
 
 
 # ─── Loop automático de sorteio ──────────────────────────────────────────────
 
 async def loop_sorteio_automatico():
-    """Aguarda 2 dias após o início do bot e repete automaticamente."""
-    global ultimo_sorteio
+    """Sorteia em intervalos aleatórios entre 1h e 2 dias."""
     await bot.wait_until_ready()
 
-    # Inicia o timer a partir do momento que o bot sobe
-    tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
-    if ultimo_sorteio is None:
-        ultimo_sorteio = datetime.now(tz)
-        print(f"[Bot] Timer do sorteio automático iniciado: {ultimo_sorteio.strftime('%d/%m/%Y %H:%M')}")
-
     while not bot.is_closed():
-        await asyncio.sleep(60)  # Verifica a cada 1 minuto
+        # Gera um intervalo aleatório a cada ciclo
+        intervalo = random.randint(SORTEAR_MIN_SECONDS, SORTEAR_MAX_SECONDS)
+        horas = intervalo // 3600
+        minutos = (intervalo % 3600) // 60
+        print(f"[Bot] Próximo sorteio automático em {horas}h {minutos}min ({intervalo}s)")
 
-        agora = datetime.now(tz)
-        diff = (agora - ultimo_sorteio).total_seconds()
-        intervalo = SORTEAR_INTERVAL_DAYS * 24 * 60 * 60  # 2 dias em segundos
+        await asyncio.sleep(intervalo)
 
-        if diff >= intervalo:
-            print("[Bot] Disparando sorteio automático...")
-            for guild in bot.guilds:
-                channel = get_sortear_channel(guild)
-                if channel:
-                    await channel.send("🔀 Sorteando cargos automaticamente, aguarde...")
-                    await executar_sorteio(guild, channel)
+        print("[Bot] Disparando sorteio automático...")
+        for guild in bot.guilds:
+            channel = get_sortear_channel(guild)
+            if channel:
+                await channel.send("🔀 Sorteando cargos automaticamente, aguarde...")
+                await executar_sorteio(guild, channel)
 
 
 # ─── Evento: impede atribuição manual de cargos gerenciados ──────────────────
@@ -776,71 +765,6 @@ async def cmd_fuzilados(ctx: commands.Context):
 
     embed.set_footer(text=f"Atualizado em {hora_agora()}")
     await msg.edit(content=None, embed=embed)
-
-# ─── Comando: !tempo — tempo restante para o próximo sorteio ────────────────
-
-@bot.command(name="tempo")
-async def cmd_tempo(ctx: commands.Context):
-    if ultimo_sorteio is None:
-        await ctx.send("⏳ O timer ainda não foi iniciado.")
-        return
-
-    tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
-    agora = datetime.now(tz)
-    intervalo = SORTEAR_INTERVAL_DAYS * 24 * 60 * 60
-    diff = (agora - ultimo_sorteio).total_seconds()
-    restante = intervalo - diff
-
-    if restante <= 0:
-        await ctx.send("🎲 O sorteio automático está prestes a acontecer!")
-        return
-
-    dias = int(restante // 86400)
-    horas = int((restante % 86400) // 3600)
-    minutos = int((restante % 3600) // 60)
-
-    proximo = ultimo_sorteio.timestamp() + intervalo
-    proximo_dt = datetime.fromtimestamp(proximo, tz=tz)
-    proximo_str = proximo_dt.strftime("%d/%m/%Y às %H:%M")
-
-    await ctx.send(
-        f"⏳ **Proximo sorteio automatico em:**\n"
-        f"**{dias}d {horas}h {minutos}min**\n"
-        f"Previsto para: **{proximo_str}**"
-    )
-
-
-# ─── Comando: !meiotempo — reduz o timer pela metade ─────────────────────────
-
-@bot.command(name="meiotempo")
-@commands.check(lambda ctx: ctx.author.id == OWNER_ID)
-async def cmd_meiotempo(ctx: commands.Context):
-    global ultimo_sorteio
-    if ultimo_sorteio is None:
-        await ctx.send("⏳ O timer ainda não foi iniciado.")
-        return
-
-    tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
-    agora = datetime.now(tz)
-    intervalo = SORTEAR_INTERVAL_DAYS * 24 * 60 * 60
-    diff = (agora - ultimo_sorteio).total_seconds()
-    restante = intervalo - diff
-
-    # Avança o timer pela metade do tempo restante
-    from datetime import timedelta
-    ultimo_sorteio = agora - timedelta(seconds=(intervalo - restante / 2))
-
-    novo_restante = restante / 2
-    dias = int(novo_restante // 86400)
-    horas = int((novo_restante % 86400) // 3600)
-    minutos = int((novo_restante % 3600) // 60)
-
-    await ctx.send(
-        f"Timer reduzido pela metade!\n"
-        f"Proximo sorteio em: **{dias}d {horas}h {minutos}min**"
-    )
-    print(f"[Bot] Timer reduzido pela metade por {ctx.author.display_name}.")
-
 
 # ─── Comando: !rescan — força rescan do audit log ────────────────────────────
 
