@@ -18,7 +18,7 @@ OWNER_ID = 308987924559691788
 LOG_CHANNEL = "banidos"
 SORTEAR_CHANNEL = "geral"
 SORTEAR_MIN_SECONDS = 3600          # 1 hora
-SORTEAR_MAX_SECONDS = 172800         # 2 dias
+SORTEAR_MAX_SECONDS = 115200         # 32 horas
 AUDIO_FILE = "audio_banimento.mp3"  # Áudio tocado ao banir/expulsar
 ALERT_MEMBER_ID = 501493721595117571  # Membro que dispara o alerta ao transmitir
 STATS_FILE = "kick_ban_stats.json"  # Arquivo de estatísticas de banimentos/expulsões
@@ -313,20 +313,31 @@ async def loop_sorteio_automatico():
     """Sorteia em intervalos aleatórios entre 1h e 2 dias."""
     await bot.wait_until_ready()
 
+    ultimo_intervalo = None
+
     while not bot.is_closed():
-        # Gera um intervalo aleatório a cada ciclo
-        intervalo = random.randint(SORTEAR_MIN_SECONDS, SORTEAR_MAX_SECONDS)
+        # Se o último intervalo foi "alto" (acima de 75% do máximo), favorece tempos baixos
+        alto_threshold = SORTEAR_MIN_SECONDS + (SORTEAR_MAX_SECONDS - SORTEAR_MIN_SECONDS) * 0.75
+
+        if ultimo_intervalo is not None and ultimo_intervalo >= alto_threshold:
+            # Força intervalo na metade inferior do range
+            intervalo = random.randint(SORTEAR_MIN_SECONDS, (SORTEAR_MIN_SECONDS + SORTEAR_MAX_SECONDS) // 2)
+            print(f"[Bot] Ultimo intervalo foi alto ({ultimo_intervalo//3600}h), forcando intervalo baixo.")
+        else:
+            intervalo = random.randint(SORTEAR_MIN_SECONDS, SORTEAR_MAX_SECONDS)
+
+        ultimo_intervalo = intervalo
         horas = intervalo // 3600
         minutos = (intervalo % 3600) // 60
-        print(f"[Bot] Próximo sorteio automático em {horas}h {minutos}min ({intervalo}s)")
+        print(f"[Bot] Proximo sorteio automatico em {horas}h {minutos}min ({intervalo}s)")
 
         await asyncio.sleep(intervalo)
 
-        print("[Bot] Disparando sorteio automático...")
+        print("[Bot] Disparando sorteio automatico...")
         for guild in bot.guilds:
             channel = get_sortear_channel(guild)
             if channel:
-                await channel.send("🔀 Sorteando cargos automaticamente, aguarde...")
+                await channel.send("Sorteando cargos automaticamente, aguarde...")
                 await executar_sorteio(guild, channel)
 
 
