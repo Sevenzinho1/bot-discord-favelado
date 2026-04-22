@@ -171,13 +171,25 @@ async def enviar_embed_tung_dark(canal: discord.TextChannel, usuario: discord.Us
 
 
 async def processar_saida_tung(guild: discord.Guild, usuario: discord.User, tipo: str):
-    canal = get_log_channel(guild)
+    # Tenta canal banidos primeiro, depois geral como fallback
+    canal = get_log_channel(guild) or get_sortear_channel(guild)
     if not canal:
+        # Último recurso: qualquer canal de texto que o bot possa enviar
+        for ch in guild.text_channels:
+            if ch.permissions_for(guild.me).send_messages:
+                canal = ch
+                break
+    if not canal:
+        print(f"[Bot] Nenhum canal encontrado para embed Tung!")
         return
+
+    print(f"[Bot] Enviando embed Tung para {usuario.name} no canal #{canal.name} (executor_punicao: {usuario.id in executores_punicao})")
+
     if usuario.id in executores_punicao:
         await enviar_embed_tung_dark(canal, usuario, tipo)
     else:
         await enviar_embed_tung(canal, usuario, tipo)
+
     executores_punicao.discard(usuario.id)
 
 
