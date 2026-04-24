@@ -171,8 +171,8 @@ async def enviar_embed_tung_dark(canal: discord.TextChannel, usuario: discord.Us
 
 
 async def processar_saida_tung(guild: discord.Guild, usuario: discord.User, tipo: str):
-    # Tenta canal banidos primeiro, depois geral como fallback
-    canal = get_log_channel(guild) or get_sortear_channel(guild)
+    # Embeds do Tung vão para o #geral, com fallback para qualquer canal disponível
+    canal = get_sortear_channel(guild)
     if not canal:
         # Último recurso: qualquer canal de texto que o bot possa enviar
         for ch in guild.text_channels:
