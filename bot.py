@@ -31,8 +31,6 @@ IMAGEM_TUNG_DARK = "https://i.imgur.com/p4PNbgT.jpg"
 # Rastreia quem baniu/expulsou nesta estadia
 executores_punicao: set = set()
 
-# Rastreia executor real do !banall: {membro_id: (autor_id, autor_name)}
-banall_executores: dict = {}
 
 # ─── Setup do bot ────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
@@ -484,25 +482,18 @@ async def on_member_remove(member: discord.Member):
     executor_name = None
     executor_id = None
     is_kick = False
-
-    # Se foi um kick via !banall, o executor real já está mapeado
-    if member.id in banall_executores:
-        executor_id, executor_name = banall_executores.pop(member.id)
-        is_kick = True
-        executores_punicao.add(executor_id)
-    else:
-        try:
-            async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
-                if entry.target.id == member.id:
-                    diff = (datetime.now(pytz.utc) - entry.created_at).total_seconds()
-                    if diff < 10:
-                        is_kick = True
-                        executor_name = entry.user.display_name
-                        executor_id = entry.user.id
-                        executores_punicao.add(executor_id)
-                    break
-        except discord.Forbidden:
-            pass
+    try:
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
+            if entry.target.id == member.id:
+                diff = (datetime.now(pytz.utc) - entry.created_at).total_seconds()
+                if diff < 10:
+                    is_kick = True
+                    executor_name = entry.user.display_name
+                    executor_id = entry.user.id
+                    executores_punicao.add(executor_id)
+                break
+    except discord.Forbidden:
+        pass
 
     channel = get_log_channel(guild)
 
@@ -765,58 +756,6 @@ async def cmd_rescan(ctx: commands.Context):
     total = sum(v.get("count", 0) for v in stats.values())
     vitimas = sum(v.get("received", 0) for v in stats.values())
     await msg.edit(content=f"Rescan concluído! **{total}** ações encontradas, **{vitimas}** vítimas registradas.")
-
-
-# ─── Comando: banall ─────────────────────────────────────────────────────────
-
-@bot.command(name="banall")
-async def cmd_banall(ctx: commands.Context):
-    guild = ctx.guild
-    author = ctx.author
-
-    # Descobre o número do cargo do autor
-    managed_roles = get_managed_roles(guild)
-    autor_num = None
-    for role in managed_roles:
-        if role in author.roles:
-            autor_num = parse_role_number(role)
-            break
-
-    if autor_num is None:
-        await ctx.send("Você não possui um cargo gerenciado para usar este comando.")
-        return
-
-    # Coleta alvos: membros com cargo de número maior (abaixo na hierarquia)
-    alvos = []
-    for role in managed_roles:
-        num = parse_role_number(role)
-        if num is not None and num > autor_num:
-            for member in list(role.members):
-                if member.id != bot.user.id and member.id not in [m.id for m in alvos]:
-                    alvos.append(member)
-
-    if not alvos:
-        await ctx.send("Nenhum membro abaixo de você para expulsar.")
-        return
-
-    await ctx.send(f"Iniciando expulsão de **{len(alvos)}** membro(s) abaixo de você...")
-    print(f"[Bot] !banall executado por {author.display_name} — {len(alvos)} alvos")
-
-    for alvo in alvos:
-        # Registra o autor real antes do kick — o on_member_remove consulta isso,
-        # pois o Discord registra o bot (não o usuário) como executor no audit log.
-        banall_executores[alvo.id] = (author.id, author.display_name)
-        executores_punicao.add(author.id)
-
-        try:
-            await guild.kick(alvo, reason=f"!banall executado por {author.display_name}")
-            print(f"[Bot] !banall: {alvo.display_name} expulso por {author.display_name}")
-        except Exception as e:
-            banall_executores.pop(alvo.id, None)
-            print(f"[Bot] !banall: erro ao expulsar {alvo.display_name}: {e}")
-
-        # Delay entre expulsões para não sobrecarregar o bot
-        await asyncio.sleep(2.5)
 
 
 # ─── Inicialização ────────────────────────────────────────────────────────────
