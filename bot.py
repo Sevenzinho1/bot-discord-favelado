@@ -22,7 +22,8 @@ SORTEAR_MIN_SECONDS = 3600
 SORTEAR_MAX_SECONDS = 115200
 AUDIO_FILE = "audio_banimento.mp3"
 ALERT_MEMBER_ID = 501493721595117571
-STATS_FILE = "kick_ban_stats.json"
+STATS_FILE = "/app/data/kick_ban_stats.json"
+os.makedirs("/app/data", exist_ok=True)
 
 # Tung Bot config
 IMAGEM_TUNG = os.environ.get("IMAGEM_TUNG", "")
