@@ -748,6 +748,11 @@ async def cmd_tiki(ctx: commands.Context):
     await tocar_audio(ctx.guild, "audio_tiki.mp3", maior_call=True)
 
 
+@bot.command(name="inferno")
+async def cmd_inferno(ctx: commands.Context):
+    await tocar_audio(ctx.guild, "_inferno.mp3", maior_call=True)
+
+
 @bot.command(name="rescan")
 @commands.check(lambda ctx: ctx.author.id == OWNER_ID)
 async def cmd_rescan(ctx: commands.Context):
