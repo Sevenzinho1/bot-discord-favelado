@@ -465,7 +465,7 @@ async def on_member_join(member: discord.Member):
 @bot.event
 async def on_member_remove(member: discord.Member):
     guild = member.guild
-    await asyncio.sleep(1.5)
+    await asyncio.sleep(3)
 
     # Verifica se foi ban
     try:
@@ -488,22 +488,28 @@ async def on_member_remove(member: discord.Member):
     if is_ban:
         return  # on_member_ban cuida do resto
 
-    # Verifica se foi kick
+    # Verifica se foi kick — tenta até 3x com intervalo para cobrir membros offline/invisíveis
+    # pois o Discord pode demorar para registrar o kick no audit log nesses casos
     executor_name = None
     executor_id = None
     is_kick = False
-    try:
-        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
-            if entry.target.id == member.id:
-                diff = (datetime.now(pytz.utc) - entry.created_at).total_seconds()
-                if diff < 10:
-                    is_kick = True
-                    executor_name = entry.user.display_name
-                    executor_id = entry.user.id
-                    executores_punicao.add(executor_id)
-                break
-    except discord.Forbidden:
-        pass
+    for tentativa in range(3):
+        try:
+            async for entry in guild.audit_logs(limit=10, action=discord.AuditLogAction.kick):
+                if entry.target.id == member.id:
+                    diff = (datetime.now(pytz.utc) - entry.created_at).total_seconds()
+                    if diff < 30:
+                        is_kick = True
+                        executor_name = entry.user.display_name
+                        executor_id = entry.user.id
+                        executores_punicao.add(executor_id)
+                    break
+        except discord.Forbidden:
+            pass
+        if is_kick:
+            break
+        if tentativa < 2:
+            await asyncio.sleep(3)
 
     channel = get_log_channel(guild)
 
