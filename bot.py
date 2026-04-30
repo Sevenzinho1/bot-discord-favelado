@@ -223,7 +223,16 @@ async def tocar_audio(guild: discord.Guild, arquivo: str, maior_call: bool = Fal
 
         from pydub import AudioSegment
         import io
-        audio = AudioSegment.from_mp3(arquivo)
+
+        # Resolve o caminho do áudio relativo ao próprio bot.py
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        audio_path = os.path.join(base_dir, arquivo)
+        if not os.path.exists(audio_path):
+            print(f"[Bot] Arquivo de áudio não encontrado: {audio_path}")
+            await voice_client.disconnect()
+            return
+
+        audio = AudioSegment.from_mp3(audio_path)
         audio = audio.set_frame_rate(48000).set_channels(2).set_sample_width(2)
         audio_source = discord.PCMAudio(io.BytesIO(audio.raw_data))
         voice_client.play(audio_source)
@@ -751,6 +760,11 @@ async def cmd_tiki(ctx: commands.Context):
 @bot.command(name="inferno")
 async def cmd_inferno(ctx: commands.Context):
     await tocar_audio(ctx.guild, "_inferno.mp3", maior_call=True)
+
+
+@bot.command(name="inferno2")
+async def cmd_inferno2(ctx: commands.Context):
+    await tocar_audio(ctx.guild, "inferno2.mp3", maior_call=True)
 
 
 @bot.command(name="rescan")
